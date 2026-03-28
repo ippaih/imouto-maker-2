@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>いもうとメーカー 2 - ふれあいボタン実装版（修正版）</title>
+    <style>
+        body { text-align: center; font-family: sans-serif; background-color: #fff0f5; margin: 0; overflow: hidden; width: 100vw; height: 100vh; }
+        #title-screen { position: absolute; inset: 0; background: pink; z-index: 1000; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #title-screen h1 { font-size: 3rem; color: white; text-shadow: 2px 2px #ff69b4; }
+        #options-screen { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 15px; border: 4px solid #ff69b4; z-index: 200; display: none; text-align: left; }
+        #ui-layer { position: relative; z-index: 100; padding-top: 10px; pointer-events: none; visibility: hidden; }
+        .controls { pointer-events: auto; }
+        
+        .char-container { position: absolute; width: 130px; z-index: 50; visibility: hidden; display: flex; flex-direction: column; align-items: center; }
+        .char-circle { 
+            width: 130px; height: 130px; border-radius: 50%; display: flex; align-items: center; justify-content: center; 
+            font-size: 35px; border: 5px solid #ff69b4; cursor: pointer; position: relative; background-color: #fffafa;
+            transition: background-color 0.3s, transform 0.2s cubic-bezier(0.45, 0.05, 0.55, 0.95);
+        }
+        
+        @keyframes shake { 0% { transform: rotate(0deg); } 25% { transform: rotate(-15deg); } 75% { transform: rotate(15deg); } 100% { transform: rotate(0deg); } }
+        .shaking { animation: shake 0.2s ease-in-out 2; }
+
+        .balloon { 
+            background: white; border: 2px solid #ff69b4; border-radius: 10px; padding: 5px 10px; 
+            font-size: 12px; font-weight: bold; margin-bottom: 10px; min-height: 20px; max-width: 150px;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.1); pointer-events: none; opacity: 0; transition: 0.3s;
+        }
+        .cheek { width: 25px; height: 15px; background: rgba(255,100,100,0.5); border-radius: 50%; position: absolute; top: 80px; }
+        
+        /* テレビウィンドウの修正：しっかりとしたダイアログ形式 */
+        #tv-window {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            width: 85%; max-width: 550px; min-height: 100px; background: rgba(255, 255, 255, 0.95);
+            border: 4px solid #ff69b4; border-radius: 15px; color: #333; padding: 20px;
+            box-sizing: border-box; text-align: left; font-size: 18px; z-index: 2000; display: none;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+        }
+        #tv-next { position: absolute; bottom: 10px; right: 20px; font-size: 12px; color: #ff69b4; animation: blink 1s infinite; font-weight: bold; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+        
+        .pet { position: absolute; font-size: 40px; z-index: 40; transition: left 2s linear, top 2s linear; pointer-events: none; }
+        .toy-item, .obstacle { position: absolute; font-size: 50px; z-index: 10; pointer-events: none; transform: translate(-50%, -50%); }
+        button { padding: 8px 12px; font-size: 13px; margin: 2px; cursor: pointer; border-radius: 5px; border: 1px solid #ccc; background: white; }
+        .active-mode { background-color: #ff69b4 !important; color: white; }
+    </style>
+</head>
+<body onmousedown="handleGlobalClick(event)">
+
+    <div id="title-screen">
+        <h1>いもうとメーカー 2</h1>
+        <button onclick="startGame()" style="font-size: 24px; padding: 15px 40px;">はじめる</button><br><br>
+        <button onclick="fakeDeleteData()" style="font-size: 14px; background: none; color: white; border: none; text-decoration: underline; cursor: pointer; pointer-events: auto;">データをけす</button>
+    </div>
+
+    <div id="options-screen">
+        <h3>設定</h3>
+        <div>
+            <strong>1人目の妹:</strong>
+            色 <input type="color" id="color1" value="#fffafa" onchange="chars[0].color = this.value; updateStyle(0);">
+            性格 <select onchange="chars[0].pers = this.value;"><option value="normal">標準</option><option value="yandere">ヤンデレ</option><option value="lady">お嬢様</option></select>
+        </div><br>
+        <div>
+            <strong>2人目の妹:</strong>
+            有効 <input type="checkbox" onchange="toggleChar2(this.checked)">
+            色 <input type="color" id="color2" value="#e0ffff" onchange="chars[1].color = this.value; updateStyle(1);">
+            性格 <select onchange="chars[1].pers = this.value;"><option value="normal">標準</option><option value="yandere">ヤンデレ</option><option value="lady">お嬢様</option></select>
+        </div><br>
+        <button onclick="toggleOptions()">閉じる</button>
+    </div>
+
+    <div id="ui-layer">
+        <div class="controls">
+            <button onclick="setMode('normal')" id="btn-normal">育成</button>
+            <button onclick="setMode('playtime')" id="btn-play">プレイ</button>
+            <button onclick="setMode('race')" id="btn-race">レース</button>
+            <button onclick="toggleOptions()">設定</button>
+            <br>
+            <button onclick="interactAll('head')">なでなで</button>
+            <button onclick="interactAll('cheek')">ぷにぷに</button>
+            <button onclick="giveFood(event)">ごはんをあげる</button>
+            <button onclick="dropFood(event)">ごはんを落とす</button>
+            <button onclick="goToSleep(event)">寝かせる</button>
+            <br>
+            <button onclick="selectToy(event, '🐍')">🐍を置く</button>
+            <button onclick="selectToy(event, '👻')">👻を置く</button>
+            <br>
+            <span>テレビ：</span>
+            <button onclick="showTV('hero')">ヒーロー</button>
+            <button onclick="showTV('idol')">アイドル</button>
+            <button onclick="showTV('pokemon')">ポケモン</button>
+            <br>
+            <span>ペット：</span>
+            <button onclick="spawnPet('🐈')">猫さん</button>
+            <button onclick="spawnPet('🐟')">さかなちゃん</button>
+            <button onclick="spawnPet('🐦')">鳥さん</button>
+        </div>
+    </div>
+
+    <div id="tv-window" onclick="nextTVText()">
+        <div id="tv-text"></div>
+        <div id="tv-next">▼ クリック or SPACE で次へ</div>
+    </div>
+
+    <div id="cont0" class="char-container">
+        <div id="ball0" class="balloon"></div>
+        <div class="char-circle" id="char0" onmousedown="handleInteraction(event, 0, 'head')">
+            <div class="cheek" style="left: 15px;" onmousedown="handleInteraction(event, 0, 'cheek')"></div>
+            <div class="cheek" style="right: 15px;" onmousedown="handleInteraction(event, 0, 'cheek')"></div>
+            <span id="face0">^ ^</span>
+        </div>
+    </div>
+
+    <div id="cont1" class="char-container">
+        <div id="ball1" class="balloon"></div>
+        <div class="char-circle" id="char1" onmousedown="handleInteraction(event, 1, 'head')">
+            <div class="cheek" style="left: 15px;" onmousedown="handleInteraction(event, 1, 'cheek')"></div>
+            <div class="cheek" style="right: 15px;" onmousedown="handleInteraction(event, 1, 'cheek')"></div>
+            <span id="face1">^ ^</span>
+        </div>
+    </div>
+
+    <script>
+        let mode = 'normal', selectedToy = null, obstacles = [];
+        let mouseX = window.innerWidth/2, mouseY = window.innerHeight/2;
+        let lastMouseMoveTime = Date.now();
+        let pets = [];
+
+        let tvActive = false, tvCurrentList = [], tvIndex = 0;
+        const tvData = {
+            hero: {
+                normal: ["『正義のヒーロー、爆誕！』", "「待て！悪党ども！これ以上はさせないぞ！」", "『必殺！超次元ビーム！！』", "「やったぁ！お兄ちゃん、かっこいいね！」"],
+                yandere: ["『正義のヒーロー、爆誕！』", "「…ヒーローなんていらない。私だけが助けてあげるのに。」", "『必殺！超次元ビーム！！』", "「お兄ちゃん、あんな偽物より私を見て？」"],
+                lady: ["『正義のヒーロー、爆誕！』", "「あら、少しは骨のある方がいらっしゃるようですわね。」", "『必殺！超次元ビーム！！』", "「わたくしもあのくらいの輝きは持ち合わせておりますわ。」"]
+            },
+            idol: {
+                normal: ["『みんな〜！愛してるよ〜！』", "（チャチャチャ、ウー、ハイ！）", "『新曲、「ぴんくのハート」聴いてください！』", "「わぁ…キラキラしてる……」"],
+                yandere: ["『みんな〜！愛してるよ〜！』", "「…愛してる？お兄ちゃんに、そんな安い言葉使わないで。」", "『新曲、「ぴんくのハート」聴いてください！』", "「私の愛の方が、もっと重くて綺麗だよ……？」"],
+                lady: ["『みんな〜！愛してるよ〜！』", "「庶民の娯楽にしては、華やかですわね。」", "『新曲、「ぴんくのハート」聴いてください！』", "「わたくしが歌えば、もっと観客が心酔しますわ。」"]
+            },
+            pokemon: {
+                normal: ["「いけっ！僕の相棒！電撃攻撃だ！」", "『ピカァーーッ！！』", "「あ！新しいモンスターを捕まえたよ！」", "「お兄ちゃん、私もあの子と一緒に遊びたいな！」"],
+                yandere: ["「いけっ！僕の相棒！電撃攻撃だ！」", "『ピカァーーッ！！』", "「あ！新しいモンスターを捕まえたよ！」", "「モンスターボール…お兄ちゃんも閉じ込めちゃいたいな…」"],
+                lady: ["「いけっ！僕の相棒！電撃攻撃だ！」", "『ピカァーーッ！！』", "「あ！新しいモンスターを捕まえたよ！」", "「わたくしのパートナーなら、もっと気高い種を選びますわ。」"]
+            }
+        };
+
+        const chars = [
+            { id: 0, cont: document.getElementById('cont0'), el: document.getElementById('char0'), face: document.getElementById('face0'), ball: document.getElementById('ball0'), x: 0, y: 0, targetX: 0, targetY: 0, color: '#ffc0cb', pers: 'normal', active: true, distracted: false, speed: 0.05, radius: 65, faceTimer: null, isSleeping: false, sleepTimer: null, isWatchingMouse: false },
+            { id: 1, cont: document.getElementById('cont1'), el: document.getElementById('char1'), face: document.getElementById('face1'), ball: document.getElementById('ball1'), x: 0, y: 0, targetX: 0, targetY: 0, color: '#e0ffff', pers: 'normal', active: false, distracted: false, speed: 0.05, radius: 65, faceTimer: null, isSleeping: false, sleepTimer: null, isWatchingMouse: false }
+        ];
+
+        const lines = {
+            normal: { head: "えへへ、楽しい！", cheek: "やめてよぉ！", food: "わーい！美味しい！", drop: "ひどい！バカ兄！", snake: "な、なにあれ…！？", ghost: "ひゃああ！おばけ！", race: "もっと速く！", crash: "いたたた…", follow: "待ってよ〜！", fight: "お兄ちゃんは私のだもん！", sleep: "Zzz...", wake: "うわぁぁん！起こさないでよぉ！", cat: "うわっ、びっくりしたぁ！", fish: "わぁ、かわいいお魚さん！", bird: "じー……（かわいい）" },
+            yandere: { head: "ずっとこうしてて…", cheek: "痛いのは嫌いじゃないよ？", food: "あはっ、お兄ちゃんの愛だね", drop: "…わざとなの？", snake: "蛇さん…逃げられないね", ghost: "…消えちゃえばいいのに", race: "逃がさないよ…", crash: "…邪魔。消すね。", follow: "どこへ行くの…？", fight: "…その子、邪魔だなぁ。", sleep: "Zzz...", wake: "…夢の邪魔をしないで。", cat: "…急に来ないでよ。驚くでしょ。", fish: "…水の中なら、逃げられないね。", bird: "…何をじっと見てるの？" },
+            lady: { head: "まぁ、気分が良いですわ", cheek: "無礼ですわよ！", food: "格別の味わいですわ", drop: "なんですの！拾いなさい！", snake: "珍しい生き物ですわね", ghost: "きゃああ！あっちへ行きなさい！", race: "わたくしの走りを見なさい！", crash: "はしたない姿を…！", follow: "お待ちなさい！", fight: "わたくしを優先しなさい！", sleep: "Zzz...", wake: "なんですの！睡眠を妨げるなんて！", cat: "あら、野蛮な生き物ですわね！", fish: "優雅に泳いでおりますわね。", bird: "……わたくしに見惚れていますの？" }
+        };
+
+        function startGame() {
+            document.getElementById('title-screen').style.display = 'none';
+            document.getElementById('ui-layer').style.visibility = 'visible';
+            chars[0].cont.style.visibility = 'visible';
+            updateStyle(0); updateStyle(1);
+            setMode('normal');
+        }
+
+        // セリフ復元版：データをけす
+        function fakeDeleteData() {
+            tvActive = true; tvIndex = 0;
+            tvCurrentList = ["「お兄ちゃん…本当に私たちのこと消しちゃうの…？ひどいよ…」", "「わたくしたちを消さないでくださいまし！泣いてしまいますわ！」", "「…そんなことしたら、私、何しちゃうかわからないよ……？」", "（データ消去に失敗しました。妹たちが拒否しています。）"];
+            document.getElementById('tv-window').style.display = 'block';
+            updateTVText();
+        }
+
+        function toggleChar2(en) {
+            chars[1].active = en;
+            chars[1].cont.style.visibility = en ? 'visible' : 'hidden';
+            if(en) { chars[1].x = chars[0].x + 150; chars[1].y = chars[0].y; chars[1].targetX = chars[1].x; chars[1].targetY = chars[1].y; }
+        }
+
+        function updateStyle(i) { chars[i].el.style.backgroundColor = chars[i].color; }
+        function toggleOptions() { const opt = document.getElementById('options-screen'); opt.style.display = (opt.style.display === 'block' ? 'none' : 'block'); }
+
+        function setMode(m) {
+            obstacles.forEach(ob => ob.remove()); obstacles = [];
+            clearPets();
+            mode = m;
+            stopTV();
+            document.querySelectorAll('button').forEach(b => b.classList.remove('active-mode'));
+            if(document.getElementById('btn-' + m)) document.getElementById('btn-' + m).classList.add('active-mode');
+            if(m === 'normal') {
+                chars.forEach(c => { c.targetX = window.innerWidth/2; c.targetY = window.innerHeight/2 + 50; c.isWatchingMouse = false; });
+            } else {
+                chars.forEach(c => { c.cont.style.transition = "none"; c.isSleeping = false; });
+            }
+        }
+
+        function spawnPet(type) {
+            if(mode !== 'normal') return;
+            const p = document.createElement('div'); p.className = 'pet'; p.innerText = type;
+            p.style.left = Math.random() * window.innerWidth + "px"; p.style.top = Math.random() * window.innerHeight + "px";
+            document.body.appendChild(p); pets.push(p);
+            let reactionKey = type === '🐈' ? 'cat' : (type === '🐟' ? 'fish' : 'bird');
+            let face = type === '🐈' ? '° ロ °' : (type === '🐟' ? '≧ ≦' : '👁 👁');
+            chars.forEach(c => { if(c.active && !c.isSleeping) { speak(c.id, lines[c.pers][reactionKey]); changeFace(c.id, face); } });
+            movePet(p);
+        }
+
+        function movePet(p) { if(!p.parentElement) return; p.style.left = Math.random() * (window.innerWidth - 50) + "px"; p.style.top = Math.random() * (window.innerHeight - 50) + "px"; setTimeout(() => movePet(p), 3000); }
+        function clearPets() { pets.forEach(p => p.remove()); pets = []; }
+
+        function showTV(type) {
+            if(mode !== 'normal') return;
+            tvActive = true; tvIndex = 0;
+            const targetPers = chars[0].active ? chars[0].pers : chars[1].pers;
+            tvCurrentList = tvData[type][targetPers];
+            document.getElementById('tv-window').style.display = 'block';
+            updateTVText();
+            chars.forEach(c => { if(c.active) { c.isSleeping = false; c.targetY = window.innerHeight / 2 - 20; changeFace(c.id, "👁 👁", 5000); } });
+        }
+
+        function nextTVText() {
+            if(!tvActive) return;
+            tvIndex++;
+            if(tvIndex >= tvCurrentList.length) stopTV();
+            else updateTVText();
+        }
+
+        function updateTVText() { document.getElementById('tv-text').innerText = tvCurrentList[tvIndex]; }
+        function stopTV() { tvActive = false; document.getElementById('tv-window').style.display = 'none'; }
+
+        document.addEventListener('keydown', (e) => {
+            if(tvActive && e.code === 'Space') { e.preventDefault(); nextTVText(); }
+        });
+
+        function changeFace(id, faceIcon, duration = 2000, bgColor = null) {
+            const c = chars[id]; c.face.innerText = faceIcon;
+            if(bgColor) c.el.style.backgroundColor = bgColor; else updateStyle(id);
+            clearTimeout(c.faceTimer);
+            c.faceTimer = setTimeout(() => { if(!c.isSleeping) { c.face.innerText = "^ ^"; updateStyle(id); } }, duration);
+        }
+
+        function handleInteraction(e, id, part) {
+            if(e) e.stopPropagation(); 
+            const c = chars[id];
+            if(!c.active) return;
+            if(c.isSleeping) { c.isSleeping = false; speak(id, lines[c.pers].wake); changeFace(id, "＞ ＜", 2000); clearTimeout(c.sleepTimer);
+                c.sleepTimer = setTimeout(() => { if(mode === 'normal') performSleep(id); }, 10000); return; }
+            if(part === 'head') { speak(id, lines[c.pers].head); changeFace(id, "≧ ≦"); }
+            else if(part === 'cheek') { speak(id, lines[c.pers].cheek); changeFace(id, "＞ ＜"); c.el.classList.add('shaking'); setTimeout(() => c.el.classList.remove('shaking'), 400); }
+        }
+
+        function interactAll(part) {
+            chars.forEach(c => { if(c.active) handleInteraction(null, c.id, part); });
+        }
+
+        function goToSleep(e) { e.stopPropagation(); if(mode !== 'normal') return; stopTV(); clearPets(); chars.forEach((c, i) => { if(c.active) performSleep(i); }); }
+        function performSleep(id) { const c = chars[id]; c.isSleeping = true; speak(id, lines[c.pers].sleep); c.face.innerText = "- _ -"; }
+
+        function handleGlobalClick(e) {
+            if (selectedToy) {
+                const toy = document.createElement('div'); toy.className = 'toy-item'; toy.innerText = selectedToy;
+                toy.style.left = e.clientX + 'px'; toy.style.top = e.clientY + 'px'; document.body.appendChild(toy);
+                chars.forEach(c => {
+                    if(!c.active || c.isSleeping) return;
+                    if(selectedToy === '🐍') { speak(c.id, lines[c.pers].snake); changeFace(c.id, "👁 👁", 3000); c.distracted = true; setTimeout(()=>c.distracted=false, 3000); }
+                    else { speak(c.id, lines[c.pers].ghost); changeFace(c.id, "° ロ °", 3000, "#ADD8E6"); c.speed = 0.25; setTimeout(()=>c.speed=0.05, 3000); }
+                });
+                selectedToy = null; setTimeout(()=>toy.remove(), 4000);
+            }
+        }
+
+        function animate() {
+            if (mode === 'normal') {
+                let timeSinceMove = Date.now() - lastMouseMoveTime;
+                chars.forEach((c, i) => {
+                    if(!c.active || c.isSleeping || tvActive) return;
+                    if (timeSinceMove < 500) { 
+                        c.targetX = mouseX + (i === 0 ? -80 : 80);
+                        c.targetY = mouseY + 50;
+                        c.isWatchingMouse = true;
+                    } else if (timeSinceMove < 4000) {
+                        if (c.isWatchingMouse && Math.abs(c.x - c.targetX) < 10) {
+                            if (Math.random() < 0.01) changeFace(c.id, "👁 👁", 500);
+                        }
+                    } else {
+                        if (c.isWatchingMouse || Math.random() < 0.01) {
+                            c.isWatchingMouse = false;
+                            if (i === 0) c.targetX = Math.random() * (window.innerWidth / 2 - 100) + 50;
+                            else c.targetX = Math.random() * (window.innerWidth / 2 - 100) + (window.innerWidth / 2 + 50);
+                            c.targetY = Math.random() * (window.innerHeight - 200) + 100;
+                        }
+                    }
+                    c.x += (c.targetX - c.x) * 0.04;
+                    c.y += (c.targetY - c.y) * 0.04;
+                });
+            } else if (mode === 'playtime') {
+                chars.forEach(c => {
+                    if(!c.active || c.distracted || c.isSleeping) return;
+                    c.x += (mouseX - c.x) * c.speed; c.y += (mouseY - c.y) * c.speed;
+                    if (Math.random() < 0.005) speak(c.id, lines[c.pers].follow);
+                });
+                if(chars[0].active && chars[1].active) {
+                    let dx = chars[1].x - chars[0].x, dy = chars[1].y - chars[0].y;
+                    let dist = Math.sqrt(dx*dx + dy*dy), minDist = 140; 
+                    if(dist < minDist) {
+                        let angle = Math.atan2(dy, dx), moveX = Math.cos(angle) * (minDist - dist) / 2, moveY = Math.sin(angle) * (minDist - dist) / 2;
+                        chars[0].x -= moveX; chars[0].y -= moveY; chars[1].x += moveX; chars[1].y += moveY;
+                        if(Math.random() < 0.01) { let id = Math.random() > 0.5 ? 0 : 1; speak(id, lines[chars[id].pers].fight); changeFace(id, "＃"); }
+                    }
+                }
+            } else if (mode === 'race') {
+                if (Math.random() < 0.03) createObstacle();
+                obstacles.forEach((ob, i) => {
+                    let x = parseFloat(ob.style.right) + 10; ob.style.right = x + 'px';
+                    chars.forEach(c => {
+                        if(!c.active) return;
+                        let r1 = ob.getBoundingClientRect(), r2 = c.cont.getBoundingClientRect();
+                        if (r1.left < r2.right && r1.right > r2.left && r1.top < r2.bottom && r1.bottom > r2.top) {
+                            speak(c.id, lines[c.pers].crash); changeFace(c.id, "× ×"); ob.remove(); obstacles.splice(i, 1);
+                        }
+                    });
+                    if (x > window.innerWidth) { ob.remove(); obstacles.splice(i, 1); }
+                });
+                chars.forEach(c => { if(c.active) c.y += (mouseY - c.y) * 0.1; });
+            }
+            chars.forEach(c => { if(c.active) { c.cont.style.left = (c.x - c.radius) + 'px'; c.cont.style.top = (c.y - c.radius - 40) + 'px'; } });
+            requestAnimationFrame(animate);
+        }
+
+        function createObstacle() {
+            const ob = document.createElement('div'); ob.className = 'obstacle'; ob.innerText = "📦";
+            ob.style.right = "-50px"; ob.style.top = Math.random() * window.innerHeight + "px";
+            document.body.appendChild(ob); obstacles.push(ob);
+        }
+
+        function speak(id, text) {
+            const b = chars[id].ball; b.innerText = text; b.style.opacity = 1;
+            clearTimeout(chars[id].timer);
+            chars[id].timer = setTimeout(() => { b.style.opacity = 0; }, 2000);
+        }
+
+        document.addEventListener('mousemove', (e) => { 
+            mouseX = e.clientX; mouseY = e.clientY; 
+            lastMouseMoveTime = Date.now(); 
+        });
+        function giveFood(e) { e.stopPropagation(); chars.forEach(c => { if(c.active && !c.isSleeping) { speak(c.id, lines[c.pers].food); changeFace(c.id, "★ ★"); } }); }
+        function dropFood(e) { e.stopPropagation(); chars.forEach(c => { if(c.active && !c.isSleeping) { speak(c.id, lines[c.pers].drop); changeFace(c.id, "＃"); } }); }
+        function selectToy(e, t) { e.stopPropagation(); selectedToy = t; }
+
+        animate();
+    </script>
+</body>
+</html>
